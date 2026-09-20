@@ -9,9 +9,6 @@ st.set_page_config(page_title="漫画検索・閲覧アプリ", layout="wide")
 # 許可されたメールアドレス
 ALLOWED_EMAIL = "takaharu3711@gmail.com"
 
-# サイトのベースURL
-BASE_URL = "https://soraraw.com/"
-
 st.title("📚 漫画検索・閲覧アプリ")
 
 # --- 1. ログイン認証処理 ---
@@ -38,73 +35,73 @@ if st.sidebar.button("ログアウト", key="logout_btn"):
 
 st.header("🔍 漫画を検索する")
 
-# 検索フォームの入力（分類と題名の一部）
+# 検索フォーム
 col1, col2 = st.columns([1, 2])
 with col1:
     genre = st.selectbox("分類（カテゴリ）:", ["すべて", "少年漫画", "少女漫画", "青年漫画", "女性漫画", "ファンタジー", "異世界", "日常・コメディ"], key="genre_select")
 with col2:
-    keyword = st.text_input("題名（タイトルの一部）:", placeholder="例: オーバーロード", key="keyword_input")
+    keyword = st.text_input("題名（タイトルの一部）:", placeholder="例: 大罪", key="keyword_input")
 
 search_button = st.button("検索実行", type="primary", key="search_btn")
 
-# スクレイピング処理関数
-def search_manga(query, genre_filter):
-    search_url = f"{BASE_URL}?s={urllib.parse.quote(query)}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+# Yahoo/Google検索経由でサイト内検索を行う関数（ブロック回避）
+def search_manga(query):
+    # Yahoo!検索を利用して soraraw.com 内のページを取得
+    search_url = f"https://search.yahoo.co.jp/search?p=site:soraraw.com+{urllib.parse.quote(query)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
     
     try:
         res = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
         
         results = []
-        # 作品要素を取得（サイトの構造に合わせて解析）
-        articles = soup.find_all("article") or soup.find_all("div", class_="post")
+        # Yahoo検索結果の各要素を取得
+        items = soup.find_all("div", class_="sw-Card") or soup.find_all("li")
         
-        for article in articles:
-            title_tag = article.find("h2") or article.find("h3") or article.find("a")
-            if not title_tag:
+        for item in items:
+            a_tag = item.find("a")
+            if not a_tag:
                 continue
-            title = title_tag.text.strip()
             
-            link_tag = article.find("a")
-            link = link_tag["href"] if link_tag and "href" in link_tag.attrs else ""
+            title = a_tag.text.strip()
+            href = a_tag.get("href", "")
             
-            img_tag = article.find("img")
-            img_src = img_tag["src"] if img_tag and "src" in img_tag.attrs else ""
-            
-            if title and link:
-                results.append({
-                    "title": title,
-                    "url": link,
-                    "image": img_src
-                })
+            # soraraw.com のページかつノイズを除外
+            if "soraraw.com" in href and title and len(title) > 2:
+                # 余計なドメイン表記や共通文言を取り除く処理
+                clean_title = title.split("-")[0].split("|")[0].strip()
+                if clean_title not in [r["title"] for r in results]:
+                    results.append({
+                        "title": clean_title,
+                        "url": href,
+                        "image": ""
+                    })
         return results
     except Exception as e:
-        st.error(f"データ取得中にエラーが発生しました: {e}")
+        st.error(f"検索中にエラーが発生しました: {e}")
         return []
 
-# 検索ボタンが押された時の動作
+# 検索実行時
 if search_button:
-    if not keyword and genre == "すべて":
+    search_term = keyword.strip()
+    if not search_term and genre != "すべて":
+        search_term = genre
+        
+    if not search_term:
         st.warning("題名の一部を入力するか、分類を選択してください。")
     else:
-        with st.spinner("soraraw.com から検索中..."):
-            search_query = keyword if keyword else genre
-            manga_list = search_manga(search_query, genre)
+        with st.spinner(f"「{search_term}」を検索中..."):
+            manga_list = search_manga(search_term)
             
             if manga_list:
-                st.success(f"{len(manga_list)} 件の作品が見つかりました！")
+                st.success(f"{len(manga_list)} 件の関連ページが見つかりました！")
                 
-                # 結果をグリッド表示
-                cols = st.columns(3)
                 for i, manga in enumerate(manga_list):
-                    with cols[i % 3]:
-                        if manga["image"]:
-                            st.image(manga["image"], use_container_width=True)
-                        st.subheader(manga["title"])
-                        if st.button("作品詳細・話一覧", key=f"btn_{i}"):
-                            st.session_state["selected_manga"] = manga
-                            st.info(f"「{manga['title']}」を選択しました。次回ステップで話一覧と閲覧機能を作成します！")
+                    with st.expander(f"📖 {manga['title']}"):
+                        st.write(f"**URL:** {manga['url']}")
+                        if st.button("作品ページを開く", key=f"open_btn_{i}"):
+                            st.markdown(f"[👉 サイトで読む]({manga['url']})", unsafe_allow_html=True)
             else:
-                st.info("該当する作品が見つかりませんでした。別のキーワードでお試しください。")
-
+                st.info("該当する作品が見つかりませんでした。別のキーワード（ひらがな・カタカナ・漢字を変えるなど）でお試しください。")
